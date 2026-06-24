@@ -16,16 +16,19 @@ export default function StarRender({ seed, star, size = 300, className }: Props)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    const ctx = canvas.getContext("2d")!;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     renderStarCanvas(canvas, { seed, star, width: size, height: size });
   }, [seed, star, size]);
 
   return (
     <canvas
       ref={canvasRef}
-      width={size}
-      height={size}
+      style={{ width: size, height: size }}
       className={className}
-      style={{ imageRendering: "pixelated" }}
     />
   );
 }

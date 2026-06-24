@@ -50,85 +50,106 @@ function renderFoundStar(
   rng: () => number
 ) {
   const baseColor = colorFromSpectralType(star.spectralType);
-  // Map magnitude: brighter (lower) = larger. Range roughly -2 to +4 for visible
   const magNorm = Math.max(0, Math.min(1, (4 - star.magnitude) / 6));
-  // Map distance: closer = warmer halo, farther = cooler
-  const distNorm = Math.min(1, star.distance / 500);
+  const scale = Math.min(width, height) / 280;
 
-  const coreRadius = 2 + magNorm * 4 + rng() * 2;
-  const haloRadius = 40 + magNorm * 80 + rng() * 40;
+  // Deep space base wash (subtle, keeps it from looking like a sticker on flat black)
+  const baseWash = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.65);
+  baseWash.addColorStop(0, "rgba(30, 18, 60, 0.35)");
+  baseWash.addColorStop(0.5, "rgba(14, 8, 32, 0.15)");
+  baseWash.addColorStop(1, "rgba(3, 2, 10, 0)");
+  ctx.fillStyle = baseWash;
+  ctx.fillRect(0, 0, width, height);
 
-  // Outer glow
-  const outerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloRadius * 1.5);
-  outerGlow.addColorStop(0, hexToRGBA(baseColor, 0.12 + magNorm * 0.08));
-  outerGlow.addColorStop(0.4, hexToRGBA(baseColor, 0.05));
+  // Faint nebulosity clouds for depth
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const cloudCount = 3 + Math.floor(rng() * 3);
+  for (let i = 0; i < cloudCount; i++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = (40 + rng() * 90) * scale;
+    const ncx = cx + Math.cos(angle) * dist;
+    const ncy = cy + Math.sin(angle) * dist;
+    const nr = (50 + rng() * 90) * scale;
+    const cloud = ctx.createRadialGradient(ncx, ncy, 0, ncx, ncy, nr);
+    cloud.addColorStop(0, hexToRGBA(baseColor, 0.04 + rng() * 0.03));
+    cloud.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = cloud;
+    ctx.beginPath();
+    ctx.arc(ncx, ncy, nr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  // Background field stars (behind the glow)
+  drawFieldStars(ctx, width, height, cx, cy, 60, rng);
+
+  const coreRadius = (2.5 + magNorm * 4) * scale;
+  const haloRadius = (50 + magNorm * 90) * scale;
+
+  // === Additive glow stack ===
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+
+  // Wide outer bloom
+  const outerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloRadius * 1.8);
+  outerGlow.addColorStop(0, hexToRGBA(baseColor, 0.22 + magNorm * 0.12));
+  outerGlow.addColorStop(0.25, hexToRGBA(baseColor, 0.08));
+  outerGlow.addColorStop(0.6, hexToRGBA(baseColor, 0.02));
   outerGlow.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = outerGlow;
   ctx.beginPath();
-  ctx.ellipse(cx, cy, haloRadius * 1.5, haloRadius * 1.5, 0, 0, Math.PI * 2);
+  ctx.arc(cx, cy, haloRadius * 1.8, 0, Math.PI * 2);
   ctx.fill();
 
-  // Mid halo
-  const midHalo = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloRadius);
-  midHalo.addColorStop(0, hexToRGBA(baseColor, 0.4 + magNorm * 0.2));
-  midHalo.addColorStop(0.3, hexToRGBA(baseColor, 0.15));
-  midHalo.addColorStop(0.7, hexToRGBA(baseColor, 0.04));
-  midHalo.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = midHalo;
+  // Tight inner bloom (white-hot)
+  const innerGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, haloRadius * 0.55);
+  innerGlow.addColorStop(0, "rgba(255, 255, 255, 0.9)");
+  innerGlow.addColorStop(0.2, hexToRGBA(baseColor, 0.6));
+  innerGlow.addColorStop(0.5, hexToRGBA(baseColor, 0.18));
+  innerGlow.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = innerGlow;
   ctx.beginPath();
-  ctx.ellipse(cx, cy, haloRadius, haloRadius, 0, 0, Math.PI * 2);
+  ctx.arc(cx, cy, haloRadius * 0.55, 0, Math.PI * 2);
   ctx.fill();
 
-  // Diffraction spikes
-  const numSpikes = 4 + Math.floor(rng() * 4) * 2; // 4, 6, or 8 (even for symmetry)
-  const spikeCount = Math.floor(numSpikes / 2); // pairs
-  const spikeBaseLength = 60 + magNorm * 120;
-
-  for (let i = 0; i < spikeCount; i++) {
-    // Primary angle with small jitter
-    const angle = (i / spikeCount) * Math.PI + rng() * 0.15 - 0.075;
-    // Vary lengths: some long, some short
-    const lengthMultiplier = i === 0 ? 1.0 : (i === 1 ? 0.85 : 0.5 + rng() * 0.3);
-    const length = spikeBaseLength * lengthMultiplier;
-    const width_ = 1.5 + magNorm * 1.5;
-
-    drawSpike(ctx, cx, cy, angle, length, width_, baseColor, magNorm);
-    drawSpike(ctx, cx, cy, angle + Math.PI, length, width_, baseColor, magNorm);
+  // Diffraction spikes — JWST-style 6-point: long vertical/horizontal pair + 4 diagonals
+  const longLen = (90 + magNorm * 150) * scale;
+  const spikeW = (1 + magNorm * 1.4) * scale;
+  // primary cross (brightest, longest)
+  drawSpikePair(ctx, cx, cy, 0 + jitter(rng), longLen, spikeW * 1.4, baseColor, magNorm);
+  drawSpikePair(ctx, cx, cy, Math.PI / 2 + jitter(rng), longLen, spikeW * 1.4, baseColor, magNorm);
+  // 4 diagonal shorter spikes
+  for (let k = 0; k < 4; k++) {
+    const a = Math.PI / 4 + (k * Math.PI) / 2 + jitter(rng);
+    drawSpikePair(ctx, cx, cy, a, longLen * (0.45 + rng() * 0.2), spikeW * 0.7, baseColor, magNorm * 0.7);
   }
 
-  // Core
-  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreRadius * 3);
-  core.addColorStop(0, "#ffffff");
-  core.addColorStop(0.3, hexToRGBA(baseColor, 0.95));
-  core.addColorStop(0.7, hexToRGBA(baseColor, 0.4));
+  // White-hot core
+  const core = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreRadius * 4);
+  core.addColorStop(0, "rgba(255,255,255,1)");
+  core.addColorStop(0.35, "rgba(255,255,255,0.85)");
+  core.addColorStop(0.6, hexToRGBA(baseColor, 0.5));
   core.addColorStop(1, "rgba(0,0,0,0)");
   ctx.fillStyle = core;
   ctx.beginPath();
-  ctx.arc(cx, cy, coreRadius * 3, 0, Math.PI * 2);
+  ctx.arc(cx, cy, coreRadius * 4, 0, Math.PI * 2);
   ctx.fill();
 
-  // Tiny bright core dot
+  ctx.restore();
+
+  // Solid blown-out center dot
   ctx.fillStyle = "#ffffff";
   ctx.beginPath();
-  ctx.arc(cx, cy, coreRadius * 0.5, 0, Math.PI * 2);
+  ctx.arc(cx, cy, coreRadius * 0.6, 0, Math.PI * 2);
   ctx.fill();
 
-  // Scattered dust specks around the halo
-  const grainCount = 15 + Math.floor(rng() * 20);
-  for (let i = 0; i < grainCount; i++) {
-    const angle = rng() * Math.PI * 2;
-    const dist = haloRadius * (0.3 + rng() * 0.8);
-    const sx = cx + Math.cos(angle) * dist;
-    const sy = cy + Math.sin(angle) * dist;
-    const sr = 0.5 + rng() * 1;
-    ctx.fillStyle = hexToRGBA(baseColor, 0.1 + rng() * 0.2);
-    ctx.beginPath();
-    ctx.arc(sx, sy, sr, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  // Fine grain over the bloom region
+  drawGrain(ctx, cx, cy, haloRadius * 1.4, baseColor, 0.04, rng);
+}
 
-  // Background field stars
-  drawFieldStars(ctx, width, height, cx, cy, 25, rng);
+function jitter(rng: () => number): number {
+  return (rng() - 0.5) * 0.08;
 }
 
 function renderVoid(
@@ -139,33 +160,35 @@ function renderVoid(
   height: number,
   rng: () => number
 ) {
-  // Very faint center glow
-  const faintGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 80);
-  faintGlow.addColorStop(0, "rgba(60, 40, 100, 0.06)");
-  faintGlow.addColorStop(1, "rgba(0,0,0,0)");
-  ctx.fillStyle = faintGlow;
+  const scale = Math.min(width, height) / 280;
+
+  // Cold deep base — emptiness, not a glow
+  const baseWash = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.max(width, height) * 0.7);
+  baseWash.addColorStop(0, "rgba(12, 10, 26, 0.25)");
+  baseWash.addColorStop(0.6, "rgba(5, 4, 14, 0.1)");
+  baseWash.addColorStop(1, "rgba(2, 1, 8, 0)");
+  ctx.fillStyle = baseWash;
+  ctx.fillRect(0, 0, width, height);
+
+  // The barest cold ember at center — almost nothing
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const ember = ctx.createRadialGradient(cx, cy, 0, cx, cy, 30 * scale);
+  ember.addColorStop(0, "rgba(120, 110, 180, 0.10)");
+  ember.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = ember;
   ctx.beginPath();
-  ctx.arc(cx, cy, 80, 0, Math.PI * 2);
+  ctx.arc(cx, cy, 30 * scale, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
 
-  // A few extremely distant specks, very faint
-  const speckCount = 4 + Math.floor(rng() * 5);
-  for (let i = 0; i < speckCount; i++) {
-    const angle = rng() * Math.PI * 2;
-    const dist = 20 + rng() * 80;
-    const sx = cx + Math.cos(angle) * dist;
-    const sy = cy + Math.sin(angle) * dist;
-    ctx.fillStyle = `rgba(180, 160, 220, ${0.05 + rng() * 0.08})`;
-    ctx.beginPath();
-    ctx.arc(sx, sy, 0.5 + rng() * 0.8, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  // Background field stars — fewer, dimmer
-  drawFieldStars(ctx, width, height, cx, cy, 8, rng);
+  // A scattering of impossibly distant specks
+  drawFieldStars(ctx, width, height, cx, cy, 22, rng);
 }
 
-function drawSpike(
+// A diffraction spike that tapers to a point at both ends (drawn as a thin diamond),
+// with a bright filament core. Assumes additive ("lighter") compositing is active.
+function drawSpikePair(
   ctx: CanvasRenderingContext2D,
   cx: number,
   cy: number,
@@ -175,25 +198,60 @@ function drawSpike(
   color: string,
   brightness: number
 ) {
-  const gradient = ctx.createLinearGradient(
-    cx, cy,
-    cx + Math.cos(angle) * length,
-    cy + Math.sin(angle) * length
-  );
-  gradient.addColorStop(0, hexToRGBA(color, 0.8 + brightness * 0.2));
-  gradient.addColorStop(0.3, hexToRGBA(color, 0.3));
-  gradient.addColorStop(1, "rgba(0,0,0,0)");
-
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(angle);
-  ctx.strokeStyle = gradient;
-  ctx.lineWidth = width_;
-  ctx.lineCap = "round";
+
+  // Soft taper body
+  const grad = ctx.createLinearGradient(-length, 0, length, 0);
+  grad.addColorStop(0, "rgba(0,0,0,0)");
+  grad.addColorStop(0.5, hexToRGBA(color, 0.5 + brightness * 0.3));
+  grad.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.moveTo(0, 0);
+  ctx.moveTo(-length, 0);
+  ctx.lineTo(0, -width_);
+  ctx.lineTo(length, 0);
+  ctx.lineTo(0, width_);
+  ctx.closePath();
+  ctx.fill();
+
+  // Bright thin filament
+  const core = ctx.createLinearGradient(-length, 0, length, 0);
+  core.addColorStop(0, "rgba(0,0,0,0)");
+  core.addColorStop(0.5, hexToRGBA(color, 0.85 + brightness * 0.15));
+  core.addColorStop(1, "rgba(0,0,0,0)");
+  ctx.strokeStyle = core;
+  ctx.lineWidth = Math.max(0.6, width_ * 0.4);
+  ctx.beginPath();
+  ctx.moveTo(-length, 0);
   ctx.lineTo(length, 0);
   ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawGrain(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  radius: number,
+  color: string,
+  intensity: number,
+  rng: () => number
+) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const count = Math.floor(radius * 1.4);
+  for (let i = 0; i < count; i++) {
+    const a = rng() * Math.PI * 2;
+    const d = Math.sqrt(rng()) * radius;
+    const x = cx + Math.cos(a) * d;
+    const y = cy + Math.sin(a) * d;
+    const falloff = 1 - d / radius;
+    ctx.fillStyle = hexToRGBA(color, intensity * falloff * rng());
+    ctx.fillRect(x, y, 1, 1);
+  }
   ctx.restore();
 }
 
@@ -206,18 +264,35 @@ function drawFieldStars(
   count: number,
   rng: () => number
 ) {
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  const tints = ["255, 255, 255", "200, 210, 255", "255, 230, 200", "220, 200, 255"];
   for (let i = 0; i < count; i++) {
     const x = rng() * width;
     const y = rng() * height;
     const dist = Math.hypot(x - cx, y - cy);
-    if (dist < 30) continue;
-    const r = 0.5 + rng() * 1;
-    const opacity = 0.2 + rng() * 0.4;
-    ctx.fillStyle = `rgba(200, 190, 230, ${opacity})`;
+    if (dist < 24) continue;
+    const bright = rng();
+    const r = 0.3 + bright * bright * 1.6;
+    const opacity = 0.15 + bright * 0.55;
+    const tint = tints[Math.floor(rng() * tints.length)];
+
+    // tiny glow for the brighter ones
+    if (bright > 0.8) {
+      const g = ctx.createRadialGradient(x, y, 0, x, y, r * 5);
+      g.addColorStop(0, `rgba(${tint}, ${opacity * 0.5})`);
+      g.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(x, y, r * 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = `rgba(${tint}, ${opacity})`;
     ctx.beginPath();
     ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
   }
+  ctx.restore();
 }
 
 function hexToRGBA(hex: string, alpha: number): string {

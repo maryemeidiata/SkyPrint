@@ -268,11 +268,11 @@ export default function Home() {
                 transition={{ duration: 0.7, delay: 0.1 }}
                 className="glass-card p-8 sm:p-10 text-center"
               >
-                <div className="flex justify-center mb-7">
+                <div className="flex justify-center mb-7 -mt-2">
                   <StarRender
                     seed={result.seed}
                     star={result.star}
-                    size={260}
+                    size={340}
                   />
                 </div>
 
